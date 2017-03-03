@@ -28,17 +28,17 @@ var buildApi = _.memoize((options) => {
  * @param request
  * @param base
  * @param path
- * @param options
+ * @param query
  * @param resolve
  * @param reject
  * @return {Promise}
  */
-var makeApiCall = (request, base, path, options, resolve, reject) => {
-    options    = _.defaults(options, {});
+var makeApiGet = (request, base, path, query, resolve, reject) => {
+    query      = _.defaults(query, {});
     path       = _.startsWith('/', path) ? path : '/' + path;
     var apiUrl = base + path;
     return new Promise(function (apiResolve, apiReject) {
-        request(base + path, {qs: options}, (err, response, body) => {
+        request(base + path, { qs: query }, (err, response, body) => {
             if (err) {
                 return apiReject(Error('Error requesting: ' + apiUrl + ' ' + err));
             }
@@ -65,7 +65,43 @@ var makeApiCall = (request, base, path, options, resolve, reject) => {
         });
 };
 
-module.exports = {
+/**
+ * Makes a Post call to the API
+ *
+ * @param request
+ * @param base
+ * @param path
+ * @param data
+ * @param resolve
+ * @param reject
+ * @return {Promise}
+ */
+var makeApiPost = (request, base, path, data, resolve, reject) => {
+    path       = _.startsWith('/', path) ? path : '/' + path;
+    var apiUrl = base + path;
+    return new Promise(function (apiResolve, apiReject) {
+        request(base + path, { method: 'POST', json: data }, (err, response, body) => {
+            if (err) {
+                return apiReject(Error('Error posting: ' + apiUrl + ' ' + err));
+            }
+
+            // TODO CORE-3409 is resolved then this can check 500 errors then reject
+
+            return apiResolve(response);
+        });
+    })
+        .then((body) => {
+            logger.log('debug', 'Completed POST request to:', apiUrl);
+            _.attempt(resolve, body);
+        })
+        .catch(function (err) {
+            logger.log('error', err);
+            _.attempt(reject, [err]);
+            throw err;
+        });
+};
+module.exports  = {
     buildApi,
-    makeApiCall
+    makeApiGet,
+    makeApiPost
 };

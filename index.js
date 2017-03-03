@@ -1,6 +1,9 @@
-var api  = require('./src/api.js');
-var _    = require('lodash');
-var argv = require('yargs')
+var api    = require('./src/api.js');
+var _      = require('lodash');
+var util = require('util');
+var EventEmitter = require('events');
+var logger  = require('./src/logger.js').logger;
+var argv   = require('yargs')
     .usage('$0 api [args]')
     .options(
         {
@@ -23,11 +26,21 @@ var argv = require('yargs')
     )
     .argv;
 
+
+function GroupEmitter() {
+    EventEmitter.call(this);
+}
+
+util.inherits(GroupEmitter, EventEmitter);
+
+var myEmitter = new GroupEmitter();
+
 var user = process.env.API_USER;
 var pass = process.env.API_PASS;
 
-var request    = api.buildApi({ auth: { user: user, password: pass } });
-var apiRequest = _.partial(api.makeApiCall, request, argv.uri);
+var request     = api.buildApi({ auth: { user: user, password: pass } });
+var apiRequest  = _.partial(api.makeApiGet, request, argv.uri);
+var postRequest = _.partial(api.makeApiPost, request, argv.uri);
 
 /**
  * Fetches all the games that are marker as regional
@@ -95,9 +108,9 @@ var getAllAddressesForGames = (getAddressIdByZip, gamesByZip) => {
             getAddressIdByZip(zipCode)
                 .then(address => {
                     return {
-                        games: games,
+                        games:     games,
                         addresses: address,
-                        zip_code: zipCode
+                        zip_code:  zipCode
                     };
                 })
         );
@@ -117,7 +130,7 @@ var getAllAddressesForGames = (getAddressIdByZip, gamesByZip) => {
 var callGetGroupsByAddress = (apiRequest, addressId) => {
     return new Promise((resolve, reject) => {
         try {
-            return apiRequest('address/' + addressId + '/group' , { per_page: 100 }, resolve, reject);
+            return apiRequest('address/' + addressId + '/group', { per_page: 100 }, resolve, reject);
         } catch (err) {
             reject(err);
         }
@@ -147,7 +160,7 @@ var getAllGroupsForAddress = (getGroupsForAddress, gamesWithAddress) => {
             result.push(
                 getGroupsForAddress(addressId)
                     .then(groups => {
-                        var appendGroups = _.cloneDeep(data);
+                        var appendGroups       = _.cloneDeep(data);
                         appendGroups['groups'] = groups;
                         return appendGroups
                     })
@@ -160,6 +173,113 @@ var getAllGroupsForAddress = (getGroupsForAddress, gamesWithAddress) => {
 };
 
 /**
+ * Promises to get all the users for a group on a page
+ *
+ * @param {Function} apiRequest -  API caller
+ * @param {String} groupId - the group id
+ * @param {Number} page - the page to get
+ * @return {Promise}
+ */
+var getAllUsersForGroup = (apiRequest, groupId, page) => {
+    return new Promise((resolve, reject) => {
+        try {
+            return apiRequest('group/' + groupId + '/users', { per_page: 100, page: page }, resolve, reject);
+        } catch (err) {
+            reject(err);
+        }
+    })
+};
+
+var processUserPage = (games, userData) => {
+    var promises = _.each(userData._embedded.items, user => {
+        _.each(games, gameId => {
+            return saveGameToUser(user.user_id, gameId)
+
+                .then((body) => {
+                    // TODO after CORE-3409 check for 422 status
+                })
+                .catch(err => {
+                    logger.log(
+                        'warn',
+                        'Error when attaching user:',
+                        user.user_id,
+                        'to game: ',
+                        gameId,
+                        'error:',
+                        err
+                    );
+                });
+        });
+    });
+
+    return Promise.resolve(Promise.all(promises));
+};
+
+
+myEmitter.on('groupPage', (groupId, games, page, resolve) => {
+    getAllUsersForGroup(apiRequest, groupId, page)
+        .then(userData => {
+            myEmitter.emit('processPage', userData);
+            page++;
+            if (_.has(userData, '_links.next')) {
+                myEmitter.emit('groupPage', groupId, games, page, resolve);
+                return;
+            }
+
+            resolve();
+        });
+});
+
+/**
+ *
+ * @param groupId
+ * @param games
+ * @return {Promise}
+ */
+var attachGamesToGroupUsers = (groupId, games) => {
+    var page = 1;
+    var processor = _.partial(processUserPage, games);
+    myEmitter.on('processPage', processor);
+    return new Promise((resolve, reject) => {
+
+        getAllUsersForGroup(apiRequest, groupId, page)
+            .then(userData => {
+                myEmitter.emit('processPage', userData, games);
+                page++;
+                if (_.has(userData, '_links.next')) {
+                    myEmitter.emit('groupPage', groupId, games, page, resolve);
+                    return;
+                }
+
+                resolve();
+            });
+    });
+};
+
+/**
+ * Promises to make an API post to attach the game to a user
+ *
+ * @param {Function} postRequest - The API caller
+ * @param {string} userId - the user Id
+ * @param {string} gameId - the game Id
+ * @return {Promise}
+ */
+var postGameToUser = (postRequest, userId, gameId) => {
+    return new Promise((resolve, reject) => {
+        try {
+            return postRequest('user/' + userId + '/game/' + gameId, {}, resolve, reject);
+        } catch (err) {
+            reject(err);
+        }
+    })
+};
+
+/**
+ * Saves the game to a user
+ */
+var saveGameToUser = _.partial(postGameToUser, postRequest);
+
+/**
  * Creates a has of zipCodes and all the games for those zip codes
  *
  * @param {Object} regionalGames - All Games that have regional games tied to them
@@ -168,7 +288,11 @@ var getAllGroupsForAddress = (getGroupsForAddress, gamesWithAddress) => {
 var createHashByZip = (regionalGames) => {
     return _.reduce(regionalGames, (result, gameData) => {
         _.each(gameData.meta.zipcodes, (zipCode) => {
-            (result[zipCode] || (result[zipCode] = [])).push(gameData.game_id);
+            (
+            result[zipCode] || (
+                result[zipCode] = []
+            )
+            ).push(gameData.game_id);
         });
 
         return result;
@@ -192,6 +316,14 @@ var result = Promise.resolve(
         })
         .then(addressWithGroups => {
             console.log(addressWithGroups);
+            var promises = _.reduce(addressWithGroups, (result, gameData) => {
+                _.each(gameData.groups, (groupId) => {
+                    result.push(attachGamesToGroupUsers(groupId, gameData.games));
+                });
+                return result;
+            }, []);
+
+            return Promise.all(promises);
         })
         .catch(console.error)
 );
