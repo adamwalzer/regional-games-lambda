@@ -270,26 +270,54 @@ module.exports = function Processor(api, logger) {
     events.on('groupUserPage', _.partial(processGroupUserPage, api));
     events.on('saveGameToUser', _.partial(postGameToUser, api));
 
+    /**
+     * Basic Processing steps for all types
+     *
+     * @return {Promise.<GameHash>}
+     */
+    var basicProcess = () => {
+        return getRegionalGames(api)
+        // setup the game hash
+            .then(createHashByZip)
+            // Find the addresses based on the zip code
+            .then(gamesByZip => {
+                return getAllAddressesForGames(getAddressIdByZip, gamesByZip);
+            })
+            // Filter Games that have have no addresses
+            .then(gameHash => {
+                return _.remove(gameHash, addressData => {
+                    return !_.isEmpty(addressData.addresses)
+                })
+            })
+            // Find all the groups for the addresses
+            .then(gameHash => {
+                return getAllGroupsForAddress(getGroupsForAddress, gameHash);
+            })
+    };
+
     return {
+        group: (group) => {
+            return basicProcess()
+                // find all the users for all groups and attach
+                .then(gameHash => {
+                    logger.log('debug', 'Processing game hash', gameHash);
+                    _.each(gameHash, gameData => {
+                        logger.log('debug', 'Game Data:', gameData);
+
+                        if (_.indexOf(gameData.groups, group) > -1) {
+                            logger.log('debug', 'Triggering event for group', groupId);
+                            events.emit('groupUserPage', gameData.games, group, 1, _.noop);
+                        }
+                    });
+                })
+                .then(() => {
+                    logger.log('info', 'Done Processing group', groupId);
+                    return true;
+                });
+        },
         cron: () => {
-            // Fetch All the regional games
-            return getRegionalGames(api)
-                // setup the game hash
-                .then(createHashByZip)
-                // Find the addresses based on the zip code
-                .then(gamesByZip => {
-                    return getAllAddressesForGames(getAddressIdByZip, gamesByZip);
-                })
-                // Filter Games that have have no addresses
-                .then(gameHash => {
-                    return _.remove(gameHash, addressData => {
-                        return !_.isEmpty(addressData.addresses)
-                    })
-                })
-                // Find all the groups for the addresses
-                .then(gameHash => {
-                    return getAllGroupsForAddress(getGroupsForAddress, gameHash);
-                })
+            return basicProcess()
+                // find all the users for all groups and attach
                 .then(gameHash => {
                     logger.log('debug', 'Processing game hash', gameHash);
                     return new Promise((reject, resolve) => {
