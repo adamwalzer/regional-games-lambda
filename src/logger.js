@@ -2,9 +2,8 @@ var winston = require('winston');
 var rollbar = require('winston-rollbar').Rollbar;
 var rollbarToken = process.env.ROLLBAR_TOKEN;
 var rollbarConfig = {
-    environment: "local",
-    level: "error",
-    enabled: false
+    environment: "lambda",
+    level: "error"
 };
 
 var logger = new (winston.Logger)({

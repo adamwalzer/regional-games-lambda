@@ -1,5 +1,4 @@
 var _ = require('lodash');
-var util = require('util');
 var logger = require('./src/logger.js').logger;
 var argv = require('yargs')
     .usage('$0 api [args]')
@@ -56,7 +55,7 @@ switch (argv.process) {
         break;
 
     case 'group':
-        logger.log('info', 'Processing all games for user');
+        logger.log('info', 'Processing all games for group', group);
         processor.group(argv.group);
         break;
 
