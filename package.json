@@ -1,0 +1,26 @@
+{
+  "name": "regional-games-lambda",
+  "version": "0.0.1",
+  "description": "Marshals adding games to users",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ginasink/regional-games-lambda.git"
+  },
+  "author": "Chuck \"MANCHUCK\" Reeves",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ginasink/regional-games-lambda/issues"
+  },
+  "homepage": "https://github.com/ginasink/regional-games-lambda#readme",
+  "dependencies": {
+    "lodash": "^4.17.4",
+    "request": "^2.79.0",
+    "winston": "^2.3.1",
+    "winston-rollbar": "^0.2.0",
+    "yargs": "^6.6.0"
+  }
+}
